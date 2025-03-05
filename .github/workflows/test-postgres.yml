@@ -89,16 +89,17 @@ jobs:
           );
           SELECT sum_sq(amount) FROM transactions;"
 
-          echo "🔒 7️⃣ Advanced Security: RLS & Auditing"
+          echo "🔒 7️⃣ Advanced Security: RLS & Auditing (Fixed)"
           psql -c "
           ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+          DROP POLICY IF EXISTS user_isolation ON users;
           CREATE POLICY user_isolation ON users FOR SELECT USING (email = current_user);
           SELECT * FROM users;"
 
-          echo "📈 8️⃣ Performance Tuning (Indexing, VACUUM, ANALYZE) - Fixed"
+          echo "📈 8️⃣ Performance Tuning (Indexing, VACUUM, ANALYZE)"
           psql -c "CREATE INDEX idx_sales_amount ON sales(amount);"
 
-          echo "Running VACUUM separately (fixing transaction issue)..."
+          echo "Running VACUUM separately..."
           psql -v ON_ERROR_STOP=1 -c "VACUUM ANALYZE sales;"
 
           echo "Running EXPLAIN ANALYZE to confirm indexing..."
