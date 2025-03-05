@@ -81,10 +81,15 @@ jobs:
           \$\$ LANGUAGE plpgsql;
           SELECT add_transaction(1, 500);"
 
-          # 🔢 Custom Aggregates
+          # 🔢 Custom Aggregates (Fixed)
           echo "🔢 6️⃣ Custom Aggregates & Extensions"
           psql -c "
-          CREATE AGGREGATE sum_sq (sfunc = int8pl, stype = int8, initcond = '0');
+          DROP AGGREGATE IF EXISTS sum_sq(NUMERIC);
+          CREATE AGGREGATE sum_sq(NUMERIC) (
+            SFUNC = numeric_add,
+            STYPE = NUMERIC,
+            INITCOND = '0'
+          );
           SELECT sum_sq(amount) FROM transactions;"
 
           # 🔒 Advanced Security: RLS
