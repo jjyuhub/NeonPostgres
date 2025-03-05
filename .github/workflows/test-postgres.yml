@@ -95,10 +95,13 @@ jobs:
           CREATE POLICY user_isolation ON users FOR SELECT USING (email = current_user);
           SELECT * FROM users;"
 
-          echo "📈 8️⃣ Performance Tuning (Indexing, VACUUM, ANALYZE)"
-          psql -c "
-          CREATE INDEX idx_sales_amount ON sales(amount);
-          VACUUM ANALYZE sales;
-          EXPLAIN ANALYZE SELECT * FROM sales WHERE amount > 100;"
+          echo "📈 8️⃣ Performance Tuning (Indexing, VACUUM, ANALYZE) - Fixed"
+          psql -c "CREATE INDEX idx_sales_amount ON sales(amount);"
+
+          echo "Running VACUUM separately (fixing transaction issue)..."
+          psql -v ON_ERROR_STOP=1 -c "VACUUM ANALYZE sales;"
+
+          echo "Running EXPLAIN ANALYZE to confirm indexing..."
+          psql -c "EXPLAIN ANALYZE SELECT * FROM sales WHERE amount > 100;"
 
           echo "✅ ALL TESTS COMPLETED SUCCESSFULLY!"
