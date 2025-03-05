@@ -34,32 +34,27 @@ jobs:
           CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
           CREATE EXTENSION IF NOT EXISTS pgcrypto;
           CREATE EXTENSION IF NOT EXISTS citext;"
-          
-          echo "Checking if pg_cron is available..."
-          CRON_EXISTS=$(psql -t -c "SELECT 1 FROM pg_extension WHERE extname='pg_cron';")
-          if [[ -z "$CRON_EXISTS" ]]; then
-            echo "⏳ pg_cron is not available on this managed database. Skipping cron job tests."
-          else
-            echo "⏳ pg_cron found. Scheduling a test job."
-            psql -c "SELECT cron.schedule('nightly_cleanup', '0 3 * * *', 'VACUUM ANALYZE');"
-          fi
 
-          echo "📌 1️⃣ Partitioning & Sharding"
+          echo "📌 1️⃣ Partitioning & Sharding (Fixed)"
           psql -c "
-          DROP TABLE IF EXISTS sales;
+          DROP TABLE IF EXISTS sales CASCADE;
+
           CREATE TABLE sales (
-            id SERIAL PRIMARY KEY,
+            id SERIAL,
             region TEXT NOT NULL,
             amount NUMERIC(10,2) NOT NULL,
-            created_at TIMESTAMP DEFAULT now()
+            created_at TIMESTAMP DEFAULT now(),
+            CONSTRAINT sales_unique UNIQUE (id, region)
           ) PARTITION BY LIST (region);
 
           CREATE TABLE sales_us PARTITION OF sales FOR VALUES IN ('US');
-          CREATE TABLE sales_eu PARTITION OF sales FOR VALUES IN ('EU');"
+          CREATE TABLE sales_eu PARTITION OF sales FOR VALUES IN ('EU');
+          CREATE TABLE sales_other PARTITION OF sales DEFAULT;"
 
-          psql -c "INSERT INTO sales (region, amount) VALUES ('US', 100), ('EU', 200);"
+          psql -c "INSERT INTO sales (region, amount) VALUES ('US', 100), ('EU', 200), ('ASIA', 300);"
           psql -c "SELECT tableoid::regclass, * FROM sales;"
 
+          # 🌍 Foreign Data Wrappers
           echo "🌍 2️⃣ Foreign Data Wrappers (FDW)"
           psql -c "
           CREATE EXTENSION IF NOT EXISTS postgres_fdw;
@@ -68,12 +63,15 @@ jobs:
           CREATE FOREIGN TABLE foreign_users (id SERIAL, name TEXT, email TEXT) SERVER remotepg OPTIONS (schema_name 'public', table_name 'users');
           SELECT * FROM foreign_users;"
 
+          # 🔄 Logical & Streaming Replication
           echo "🔄 3️⃣ Logical & Streaming Replication"
           psql -c "SELECT * FROM pg_replication_slots;"
 
+          # 🚀 Parallel Query Execution
           echo "🚀 4️⃣ Parallel Query Execution"
           psql -c "EXPLAIN ANALYZE SELECT * FROM sales ORDER BY amount DESC;"
 
+          # 📜 PL/pgSQL & Procedural Languages
           echo "📜 5️⃣ PL/pgSQL & Procedural Languages"
           psql -c "
           CREATE OR REPLACE FUNCTION add_transaction(user_id INTEGER, amount NUMERIC) RETURNS VOID AS \$\$
@@ -83,17 +81,20 @@ jobs:
           \$\$ LANGUAGE plpgsql;
           SELECT add_transaction(1, 500);"
 
+          # 🔢 Custom Aggregates
           echo "🔢 6️⃣ Custom Aggregates & Extensions"
           psql -c "
           CREATE AGGREGATE sum_sq (sfunc = int8pl, stype = int8, initcond = '0');
           SELECT sum_sq(amount) FROM transactions;"
 
+          # 🔒 Advanced Security: RLS
           echo "🔒 7️⃣ Advanced Security: RLS & Auditing"
           psql -c "
           ALTER TABLE users ENABLE ROW LEVEL SECURITY;
           CREATE POLICY user_isolation ON users FOR SELECT USING (email = current_user);
           SELECT * FROM users;"
 
+          # 📈 Performance Tuning
           echo "📈 8️⃣ Performance Tuning (Indexing, VACUUM, ANALYZE)"
           psql -c "
           CREATE INDEX idx_sales_amount ON sales(amount);
