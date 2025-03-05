@@ -1,4 +1,4 @@
-name: Exhaustive PostgreSQL Tests
+name: Ultimate PostgreSQL Feature Showcase
 
 on:
   push:
@@ -14,10 +14,10 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install PostgreSQL Client
-        run: sudo apt-get install -y postgresql-client
+      - name: Install PostgreSQL Client & Extensions
+        run: sudo apt-get install -y postgresql-client postgresql-contrib
 
-      - name: Connect and Run PostgreSQL Tests
+      - name: Run PostgreSQL Feature Tests
         env:
           PGHOST: ${{ secrets.PGHOST }}
           PGDATABASE: ${{ secrets.PGDATABASE }}
@@ -25,94 +25,72 @@ jobs:
           PGPASSWORD: ${{ secrets.PGPASSWORD }}
           PGSSLMODE: ${{ secrets.PGSSLMODE }}
         run: |
-          echo "Testing PostgreSQL connection..."
+          echo "🛠️ Testing PostgreSQL Connection..."
           psql -c "SELECT version();"
 
-          echo "Creating tables with PostgreSQL-specific features..."
+          echo "🔄 Enabling Extensions..."
+          psql -c "CREATE EXTENSION IF NOT EXISTS hstore;
+                   CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+                   CREATE EXTENSION IF NOT EXISTS pgcrypto;
+                   CREATE EXTENSION IF NOT EXISTS citext;
+                   CREATE EXTENSION IF NOT EXISTS pg_cron;"
+
+          echo "📌 1️⃣ Partitioning & Sharding"
           psql -c "
-          DROP TABLE IF EXISTS users, products, transactions, geo_locations;
-
-          -- JSONB and HSTORE for NoSQL-like features
-          CREATE EXTENSION IF NOT EXISTS hstore;
-          CREATE TABLE users (
+          DROP TABLE IF EXISTS sales;
+          CREATE TABLE sales (
             id SERIAL PRIMARY KEY,
-            name TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            preferences JSONB DEFAULT '{}',
-            metadata HSTORE
-          );
-
-          -- Full-Text Search
-          CREATE TABLE products (
-            id SERIAL PRIMARY KEY,
-            name TEXT NOT NULL,
-            description TEXT NOT NULL,
-            tsv_description TSVECTOR GENERATED ALWAYS AS (to_tsvector('english', description)) STORED
-          );
-          CREATE INDEX tsv_idx ON products USING GIN(tsv_description);
-
-          -- Transactions & Savepoints
-          CREATE TABLE transactions (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER REFERENCES users(id),
-            amount NUMERIC(10,2),
+            region TEXT NOT NULL,
+            amount NUMERIC(10,2) NOT NULL,
             created_at TIMESTAMP DEFAULT now()
-          );
+          ) PARTITION BY LIST (region);
 
-          -- Geospatial Queries (PostGIS)
-          CREATE EXTENSION IF NOT EXISTS postgis;
-          CREATE TABLE geo_locations (
-            id SERIAL PRIMARY KEY,
-            name TEXT,
-            location GEOMETRY(Point, 4326)
-          );"
+          CREATE TABLE sales_us PARTITION OF sales FOR VALUES IN ('US');
+          CREATE TABLE sales_eu PARTITION OF sales FOR VALUES IN ('EU');"
 
-          echo "Inserting test data..."
+          psql -c "INSERT INTO sales (region, amount) VALUES ('US', 100), ('EU', 200);"
+          psql -c "SELECT tableoid::regclass, * FROM sales;"
+
+          echo "🌍 2️⃣ Foreign Data Wrappers (FDW)"
           psql -c "
-          INSERT INTO users (name, email, preferences, metadata) VALUES 
-            ('John Doe', 'john@example.com', '{\"dark_mode\": true}', 'subscription => premium'),
-            ('Jane Doe', 'jane@example.com', '{\"dark_mode\": false}', 'subscription => basic')
-          ON CONFLICT DO NOTHING;
+          CREATE EXTENSION IF NOT EXISTS postgres_fdw;
+          CREATE SERVER remotepg FOREIGN DATA WRAPPER postgres_fdw OPTIONS (host '${PGHOST}', dbname '${PGDATABASE}', port '5432');
+          CREATE USER MAPPING FOR CURRENT_USER SERVER remotepg OPTIONS (user '${PGUSER}', password '${PGPASSWORD}');
+          CREATE FOREIGN TABLE foreign_users (id SERIAL, name TEXT, email TEXT) SERVER remotepg OPTIONS (schema_name 'public', table_name 'users');
+          SELECT * FROM foreign_users;"
 
-          INSERT INTO products (name, description) VALUES 
-            ('PostgreSQL T-Shirt', 'A comfortable t-shirt for PostgreSQL fans.'),
-            ('PostgreSQL Mug', 'A stylish mug with the PostgreSQL logo.')
-          ON CONFLICT DO NOTHING;
+          echo "🔄 3️⃣ Logical & Streaming Replication"
+          psql -c "SELECT * FROM pg_replication_slots;"
 
-          INSERT INTO transactions (user_id, amount) VALUES 
-            (1, 49.99), (2, 19.99), (1, 99.99);
+          echo "🚀 4️⃣ Parallel Query Execution"
+          psql -c "EXPLAIN ANALYZE SELECT * FROM sales ORDER BY amount DESC;"
 
-          INSERT INTO geo_locations (name, location) VALUES 
-            ('Neon Office', ST_GeomFromText('POINT(-74.006 40.7128)', 4326));"
-
-          echo "Testing PostgreSQL advanced features..."
-
-          echo "✅ JSONB & HSTORE Query:"
-          psql -c "SELECT name, preferences->'dark_mode' AS dark_mode FROM users;"
-
-          echo "✅ Full-Text Search:"
-          psql -c "SELECT name FROM products WHERE tsv_description @@ to_tsquery('t-shirt');"
-
-          echo "✅ Window Functions (Running Total Transactions):"
+          echo "📜 5️⃣ PL/pgSQL & Procedural Languages"
           psql -c "
-          SELECT id, user_id, amount, 
-                 SUM(amount) OVER (PARTITION BY user_id ORDER BY created_at) AS running_total
-          FROM transactions;"
+          CREATE OR REPLACE FUNCTION add_transaction(user_id INTEGER, amount NUMERIC) RETURNS VOID AS \$\$
+          BEGIN
+            INSERT INTO transactions (user_id, amount) VALUES (user_id, amount);
+          END;
+          \$\$ LANGUAGE plpgsql;
+          SELECT add_transaction(1, 500);"
 
-          echo "✅ CTEs (Common Table Expressions):"
+          echo "🔢 6️⃣ Custom Aggregates & Extensions"
           psql -c "
-          WITH recent_transactions AS (
-            SELECT * FROM transactions ORDER BY created_at DESC LIMIT 2
-          )
-          SELECT * FROM recent_transactions;"
+          CREATE AGGREGATE sum_sq (sfunc = int8pl, stype = int8, initcond = '0');
+          SELECT sum_sq(amount) FROM transactions;"
 
-          echo "✅ LATERAL JOIN (Fetching users and last transaction together):"
+          echo "🔒 7️⃣ Advanced Security: RLS & Auditing"
           psql -c "
-          SELECT u.name, t.amount FROM users u 
-          LEFT JOIN LATERAL (SELECT amount FROM transactions WHERE transactions.user_id = u.id ORDER BY created_at DESC LIMIT 1) t
-          ON true;"
+          ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+          CREATE POLICY user_isolation ON users FOR SELECT USING (email = current_user);
+          SELECT * FROM users;"
 
-          echo "✅ Geospatial Query (Finding Locations Near Point):"
+          echo "📈 8️⃣ Performance Tuning (Indexing, VACUUM, ANALYZE)"
           psql -c "
-          SELECT name FROM geo_locations 
-          WHERE ST_DWithin(location, ST_GeomFromText('POINT(-74.006 40.7128)', 4326), 1000);"
+          CREATE INDEX idx_sales_amount ON sales(amount);
+          VACUUM ANALYZE sales;
+          EXPLAIN ANALYZE SELECT * FROM sales WHERE amount > 100;"
+
+          echo "⏳ 9️⃣ Cron Jobs (pg_cron, pgAgent)"
+          psql -c "
+          SELECT cron.schedule('nightly_cleanup', '0 3 * * *', 'VACUUM ANALYZE');"
