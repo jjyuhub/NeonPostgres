@@ -1,0 +1,39 @@
+name: PostgreSQL Database Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test-database:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install PostgreSQL Client
+        run: sudo apt-get install -y postgresql-client
+
+      - name: Connect and Run SQL Tests
+        env:
+          PGHOST: ${{ secrets.PGHOST }}
+          PGDATABASE: ${{ secrets.PGDATABASE }}
+          PGUSER: ${{ secrets.PGUSER }}
+          PGPASSWORD: ${{ secrets.PGPASSWORD }}
+          PGSSLMODE: ${{ secrets.PGSSLMODE }}
+        run: |
+          echo "Testing PostgreSQL connection..."
+          psql -c "SELECT version();"
+
+          echo "Creating table (if not exists)..."
+          psql -c "CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL);"
+
+          echo "Inserting test data..."
+          psql -c "INSERT INTO users (name, email) VALUES ('John Doe', 'john@example.com') ON CONFLICT DO NOTHING;"
+          psql -c "INSERT INTO users (name, email) VALUES ('Jane Doe', 'jane@example.com') ON CONFLICT DO NOTHING;"
+
+          echo "Checking inserted data..."
+          psql -c "SELECT * FROM users;"
