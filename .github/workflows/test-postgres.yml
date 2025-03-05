@@ -1,4 +1,4 @@
-name: PostgreSQL Database Tests
+name: Exhaustive PostgreSQL Tests
 
 on:
   push:
@@ -17,7 +17,7 @@ jobs:
       - name: Install PostgreSQL Client
         run: sudo apt-get install -y postgresql-client
 
-      - name: Connect and Run SQL Tests
+      - name: Connect and Run PostgreSQL Tests
         env:
           PGHOST: ${{ secrets.PGHOST }}
           PGDATABASE: ${{ secrets.PGDATABASE }}
@@ -28,12 +28,91 @@ jobs:
           echo "Testing PostgreSQL connection..."
           psql -c "SELECT version();"
 
-          echo "Creating table (if not exists)..."
-          psql -c "CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL);"
+          echo "Creating tables with PostgreSQL-specific features..."
+          psql -c "
+          DROP TABLE IF EXISTS users, products, transactions, geo_locations;
+
+          -- JSONB and HSTORE for NoSQL-like features
+          CREATE EXTENSION IF NOT EXISTS hstore;
+          CREATE TABLE users (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            preferences JSONB DEFAULT '{}',
+            metadata HSTORE
+          );
+
+          -- Full-Text Search
+          CREATE TABLE products (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL,
+            tsv_description TSVECTOR GENERATED ALWAYS AS (to_tsvector('english', description)) STORED
+          );
+          CREATE INDEX tsv_idx ON products USING GIN(tsv_description);
+
+          -- Transactions & Savepoints
+          CREATE TABLE transactions (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id),
+            amount NUMERIC(10,2),
+            created_at TIMESTAMP DEFAULT now()
+          );
+
+          -- Geospatial Queries (PostGIS)
+          CREATE EXTENSION IF NOT EXISTS postgis;
+          CREATE TABLE geo_locations (
+            id SERIAL PRIMARY KEY,
+            name TEXT,
+            location GEOMETRY(Point, 4326)
+          );"
 
           echo "Inserting test data..."
-          psql -c "INSERT INTO users (name, email) VALUES ('John Doe', 'john@example.com') ON CONFLICT DO NOTHING;"
-          psql -c "INSERT INTO users (name, email) VALUES ('Jane Doe', 'jane@example.com') ON CONFLICT DO NOTHING;"
+          psql -c "
+          INSERT INTO users (name, email, preferences, metadata) VALUES 
+            ('John Doe', 'john@example.com', '{\"dark_mode\": true}', 'subscription => premium'),
+            ('Jane Doe', 'jane@example.com', '{\"dark_mode\": false}', 'subscription => basic')
+          ON CONFLICT DO NOTHING;
 
-          echo "Checking inserted data..."
-          psql -c "SELECT * FROM users;"
+          INSERT INTO products (name, description) VALUES 
+            ('PostgreSQL T-Shirt', 'A comfortable t-shirt for PostgreSQL fans.'),
+            ('PostgreSQL Mug', 'A stylish mug with the PostgreSQL logo.')
+          ON CONFLICT DO NOTHING;
+
+          INSERT INTO transactions (user_id, amount) VALUES 
+            (1, 49.99), (2, 19.99), (1, 99.99);
+
+          INSERT INTO geo_locations (name, location) VALUES 
+            ('Neon Office', ST_GeomFromText('POINT(-74.006 40.7128)', 4326));"
+
+          echo "Testing PostgreSQL advanced features..."
+
+          echo "✅ JSONB & HSTORE Query:"
+          psql -c "SELECT name, preferences->'dark_mode' AS dark_mode FROM users;"
+
+          echo "✅ Full-Text Search:"
+          psql -c "SELECT name FROM products WHERE tsv_description @@ to_tsquery('t-shirt');"
+
+          echo "✅ Window Functions (Running Total Transactions):"
+          psql -c "
+          SELECT id, user_id, amount, 
+                 SUM(amount) OVER (PARTITION BY user_id ORDER BY created_at) AS running_total
+          FROM transactions;"
+
+          echo "✅ CTEs (Common Table Expressions):"
+          psql -c "
+          WITH recent_transactions AS (
+            SELECT * FROM transactions ORDER BY created_at DESC LIMIT 2
+          )
+          SELECT * FROM recent_transactions;"
+
+          echo "✅ LATERAL JOIN (Fetching users and last transaction together):"
+          psql -c "
+          SELECT u.name, t.amount FROM users u 
+          LEFT JOIN LATERAL (SELECT amount FROM transactions WHERE transactions.user_id = u.id ORDER BY created_at DESC LIMIT 1) t
+          ON true;"
+
+          echo "✅ Geospatial Query (Finding Locations Near Point):"
+          psql -c "
+          SELECT name FROM geo_locations 
+          WHERE ST_DWithin(location, ST_GeomFromText('POINT(-74.006 40.7128)', 4326), 1000);"
